@@ -54,6 +54,84 @@ async function formatUrls(list) {
     }
     return list;
 }
+
+/** 请求page-data.json文件 */
+async function req(pageDataUrl) {
+
+    try {
+        const url = `${DOMAIN}${pageDataUrl}`;
+        const res = await axios(url);
+        const data = res.data;
+        console.log(data);
+        const wiki = data.path;
+        console.log('wiki = ' + wiki);
+        const dec = `/** @wiki ${wiki} */`;
+
+        const htmlAst = data.result.data.markdownRemark.htmlAst;
+        const eleArr = htmlAst.children;
+        let srcArr = [];
+        let newArr = [];
+        for (let i = 0; i < eleArr.length; i++) {
+            const element = eleArr[i];
+            // 只提取element元素
+            if (element.type == 'element') {
+                srcArr.push(element);
+                let value = getElementTxt(element);
+                value = value.replace(/\n/ig, ''); //去掉换行
+                const properties = element.properties
+                let elementData = { tagName: element.tagName, value };
+                if (properties) {
+                    elementData.properties = properties;
+                }
+                newArr.push(elementData);
+            }
+        }
+        // saveFile('srcArr.json', srcArr);
+        // saveFile('newArr.json', newArr);
+
+        // getDefineStr(newArr);
+        return newArr;
+    } catch (error) {
+        console.log('error url: ' + url);
+        console.error(error);
+        return [];
+    }
+
+    // axios(url)
+    //     .then(res => {
+    //         // console.log(res.data);
+    //         const data = res.data;
+    //         console.log(data);
+    //         const wiki = data.path;
+    //         console.log('wiki = ' + wiki);
+    //         const dec = `/** @wiki ${wiki} */`;
+
+    //         const htmlAst = data.result.data.markdownRemark.htmlAst;
+    //         const eleArr = htmlAst.children;
+    //         let srcArr = [];
+    //         let newArr = [];
+    //         for (let i = 0; i < eleArr.length; i++) {
+    //             const element = eleArr[i];
+    //             // 只提取element元素
+    //             if (element.type == 'element') {
+    //                 srcArr.push(element);
+    //                 let value = getElementTxt(element);
+    //                 value = value.replace(/\n/ig, ''); //去掉换行
+    //                 newArr.push({ tagName: element.tagName, value });
+    //             }
+    //         }
+    //         // saveFile('srcArr.json', srcArr);
+    //         saveFile('newArr.json', newArr);
+
+    //         getDefineStr(newArr);
+
+    //         // insert(dec, inner);
+    //         // const define = `declare namespace tt {${inner}}`;
+    //         // saveFile('ttgame.d.ts', define);
+    //     })
+    //     .catch(err => console.error(err));
+
+}
 /**
  * 获取详细的api文件
  * @param {*} flatArr 
@@ -61,16 +139,72 @@ async function formatUrls(list) {
 async function getDetail(flatArr) {
     const arr = await formatUrls(flatArr);
     saveFile('flatArr.json', arr);
+    
+    let dataArr = [];
+    for (let index = 0; index < arr.length; index++) {
+        const data = arr[index];
+        const eleArr = await req(data.pageDataUrl);
+        dataArr[index] = eleArr;
+    }
 
-    const url = `${DOMAIN}${arr[1].pageDataUrl}`;
-    axios(url)
-        .then(res => {
-            console.log(res.data);
-            saveFile('res.json', res.data);
-        })
-        .catch(err => console.error(err));
+    saveFile('dataArr.json', dataArr);
 }
 
+/** 插入字符串 */
+function insert(str, dest) {
+    dest += '\n' + str + '\n';
+}
+
+/** 获取element的文本内容 */
+function getElementTxt(element) {
+    let txt = '';
+    const arr = element.children;
+    if (element.tagName == 'h1') {
+        txt = arr[1].value;
+        return txt;
+    }
+    for (let i = 0; i < arr.length; i++) {
+        const subElement = arr[i];
+        if (subElement.type == 'element') {
+            txt += getElementTxt(subElement);
+        } else {
+            txt += subElement.value || '';
+        }
+    }
+    return txt;
+}
+
+/** 获取定义字符串 */
+function getDefineStr(arr) {
+    // const temp = {
+    //     1: 'function createCanvas(M): void',
+    //     2: 'interface N {M}',
+    //     3: 'declare function',
+    // }
+    const firstNode = arr[0];
+    let txt = firstNode.value;
+    // 是tt的方法
+    if (/^tt./i.test(txt)) {
+        type = 1;
+        console.log('是tt的方法');
+        const funcName = txt.replace('tt.', '');
+    } else {
+        // 是子对象的方法
+        if (/./ig.test(txt)) {
+            console.log('是子对象的方法');
+            type = 2;
+            const txtArr = txt.split('.');
+            const objName = txtArr[0];
+            const objFuncName = txtArr[1];
+            // str = `function ${funcName}()`
+        } else {
+            // 是全局方法
+            type = 3;
+            console.log('是全局方法');
+            const globalFuncName = txt;
+        }
+    }
+}
 
 /** 获取api目录列表 */
 async function getApiList(page) {
@@ -170,3 +304,13 @@ try {
     console.error(error);
 }
 
+
+/**
+ * 页面结构会遇到的标签
+ * h1 - tt方法名、子对象名、子对象方法名
+ * blockqute - 块引用
+ * p - 内容描述
+ * h2 - 属性 参数|输入  输出|返回|返回值  代码示例
+ * h3 - 具体的属性方法描述了
+ *
+ */
